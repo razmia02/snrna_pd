@@ -1,11 +1,12 @@
-# Predicting Circular RNAs in Parkinsons Disease (PD)
+# Identifying Non-Coding RNAs in Parkinsons Disease (PD)
 
 ![Status: In Progress](https://img.shields.io/badge/status-in--progress-orange)
 
-Predicting cell-type-specific circular RNA splicing in Parkinson's Disease (PD) and Parkinson's Disease Dementia (PDD) from single-nucleus RNA-seq data using Seurat, Harmony, and CIRI-deepA.
+Analysis of snRNA-Seq to profile long non-coding RNAs (lncRNAs) and predict cell-type-specific circular RNA (circRNA) splicing in Parkinson's Disease (PD) and Parkinson's Disease Dementia (PDD) from NCBI GEO dataset [GSE184950](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE184950).
 
 ## Workflow Overview
-1. **Metadata Curation:** Classify 34 human brain donor samples.
-2. **Preprocessing & QC:** Merge matrices, apply strict nuclear QC filters, and cluster using Seurat.
+1. **Metadata Curation:** Classify 34 human brain donor samples (incorporating age, gender, race, PMI, and Braak stages).
+2. **Preprocessing & QC:** Merge matrices, apply strict nuclear QC filters (mitochondrial reads < 1%), and cluster using Seurat.
 3. **Integration:** Address potential batch effects using Harmony.
-4. **Prediction:** Extract RNA-Binding Protein (RBP) profiles and run CIRI-deep to predict differential circRNA splicing.
+4. **lncRNA Profiling:** Directly extract and analyze physically captured, nuclear-enriched lncRNA expression across cell clusters.
+5. **circRNA Prediction:** Leverage the same cell clusters to extract RNA-Binding Protein (RBP) profiles, using CIRI-deepA to predict differential circRNA splicing.
