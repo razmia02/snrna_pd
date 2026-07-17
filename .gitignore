@@ -2,3 +2,9 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# Ignore all contents inside the Data directory
+Data/*
+
+# But do NOT ignore the .gitkeep file
+!Data/.gitkeep
