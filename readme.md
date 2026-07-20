@@ -2,7 +2,7 @@
 
 ![Status: In Progress](https://img.shields.io/badge/status-in--progress-orange)
 
-Analysis of snRNA-Seq to profile long non-coding RNAs (lncRNAs) and predict cell-type-specific circular RNA (circRNA) splicing in Parkinson's Disease (PD) and Parkinson's Disease Dementia (PDD) from NCBI GEO dataset [GSE184950](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE184950).
+Analysis of snRNA-Seq to profile long non-coding RNAs (lncRNAs) and predict cell-type-specific circular RNA (circRNA) splicing in Parkinson's Disease (PD) and Parkinson's Disease Dementia (PDD) from NCBI GEO dataset [GSE157783](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE157783).
 
 ## Workflow Overview
 1. **Metadata Curation:** Classify 34 human brain donor samples (incorporating age, gender, race, PMI, and Braak stages).
