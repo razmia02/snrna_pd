@@ -8,5 +8,5 @@ Analysis of snRNA-Seq to profile long non-coding RNAs (lncRNAs) and predict cell
 1. **Metadata Curation:** Classify 11 human brain donor samples.
 2. **Preprocessing & QC:** Merge matrices, apply strict nuclear QC filters (mitochondrial reads < 1%), and cluster using Seurat.
 3. **Integration:** Address potential batch effects using Harmony.
-4. **lncRNA Profiling:** Directly extract and analyze physically captured, nuclear-enriched lncRNA expression across cell clusters.
+4. **lncRNA Profiling:** Directly extract and analyze physically captured, nuclear-enriched lncRNA expression across cell clusters and calculate cell-type specificity index. 
 5. **circRNA Prediction:** Leverage the same cell clusters to extract RNA-Binding Protein (RBP) profiles, using CIRI-deepA to predict differential circRNA splicing.
