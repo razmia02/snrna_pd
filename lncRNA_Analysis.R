@@ -16,6 +16,7 @@ library(EnsDb.Hsapiens.v86)
 
 
 
+
 ############ STEP-1: LOAD THE DATA #####################
 ?readMM
 
@@ -180,9 +181,9 @@ seurat <- FindClusters(seurat, resolution = 1)
 
 ########## Change the resolution to check the number of clusters ##########
 
-seurat <- FindClusters(seurat, resolution = 0.5)
+seurat <- FindClusters(seurat, resolution = 0.2)
 
-seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 12 clusters 
+seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 13 clusters 
 
 DimPlot(seurat, reduction = "umap", label = TRUE)
 
@@ -197,10 +198,38 @@ DimPlot(seurat, reduction = "umap", label = TRUE)
 gene_map <- ensembldb::select(EnsDb.Hsapiens.v86, keys = rownames(seurat),
                               keytype = "GENEID", columns = "SYMBOL")
 
-gene_map <- gene_map[!duplicated(gene_map$GENEID), ]  # keep first mapping per Ensembl ID
+gene_map <- gene_map[!duplicated(gene_map$GENEID), ]  #### keep mapping per Ensembl ID
 
 seurat[["RNA"]]@meta.data$symbol <- gene_map$SYMBOL[match(rownames(seurat), gene_map$GENEID)]
 
-sum(is.na(seurat[["RNA"]]@meta.data$symbol))
 
-seurat$symbol <- ifelse(is.na(seurat[["RNA"]]@meta.data$symbol), rownames(seurat), seurat[["RNA"]]@meta.data$symbol)
+############## Some genes have NA symbol #####################
+
+sum(is.na(seurat[["RNA"]]@meta.data$symbol)) ##### Check the number of NA ids
+
+########## Get the list of NA ids #########################
+
+na_ids <- rownames(seurat)[is.na(seurat[["RNA"]]@meta.data$symbol)]
+
+length(na_ids) ##### 192 Genes have NA symbol 
+
+na_ids
+
+########## Assign the ensemble id back to the NA symbol ##########
+
+symbol_col <- seurat[["RNA"]]@meta.data$symbol
+
+na_idx <- is.na(symbol_col)
+
+symbol_col[na_idx] <- rownames(seurat)[na_idx]
+
+seurat[["RNA"]]@meta.data$symbol <- symbol_col
+
+sum(is.na(seurat[["RNA"]]@meta.data$symbol))  # should now be 0
+
+seurat[["RNA"]]@meta.data$symbol
+
+
+################### STEP-11: REMOVE DOUBLETS #######################
+saveRDS(seurat, file = "seurat.rds")
+
