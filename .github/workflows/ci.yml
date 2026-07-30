@@ -1,0 +1,48 @@
+name: R-snRNAseq-CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout repository code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Set up R environment (using official r-lib actions)
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.3.0'
+
+      # 3. Cache R packages to make future CI runs fast
+      - name: Cache R packages
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ubuntu-r-${{ hashFiles('**/renv.lock') }}
+          restore-keys: |
+            ubuntu-r-
+
+      # 4. Install system dependencies required by spatial/single-cell R packages (hdf5, geos, etc.)
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libhdf5-dev libgeos-dev libgsl-dev libglpk-dev
+
+      # 5. Install R packages and dependencies
+      - name: Install R Dependencies
+        run: |
+          Rscript -e "if (!requireNamespace('BiocManager', quietly = TRUE)) install.packages('BiocManager')"
+          Rscript -e "BiocManager::install(c('Seurat', 'SingleCellExperiment', 'rmarkdown', 'testthat'))"
+
+      # 6. Execute smoke test script or render RMarkdown analysis
+      - name: Run Analysis Smoke Test
+        run: |
+          Rscript -e "source('tests/test_pipeline.R')"
