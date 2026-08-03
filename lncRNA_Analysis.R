@@ -185,6 +185,10 @@ seurat <- FindClusters(seurat, resolution = 0.2)
 
 seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 13 clusters 
 
+
+seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 15 clusters 
+
+
 DimPlot(seurat, reduction = "umap", label = TRUE)
 
 ######### Final resolution: 0.1 ##################
@@ -232,4 +236,92 @@ seurat[["RNA"]]@meta.data$symbol
 
 ################### STEP-11: REMOVE DOUBLETS #######################
 saveRDS(seurat, file = "seurat.rds")
+
+
+symbols <- ifelse(is.na(seurat[["RNA"]]@meta.data$symbol), rownames(seurat), seurat[["RNA"]]@meta.data$symbol)
+
+valid.symbols <- make.unique(symbols)
+
+######### Assin symbols to rownames ##################
+
+rownames(seurat[["RNA"]]) <- valid.symbols
+
+rownames(seurat@assays$RNA) <- valid.symbols
+
+################ STEP-11: REMOVE DOUBLETS ################################
+########### Using scDblFinder ######################
+
+###### Convert seurat object to SingleCellExperiment ###################
+
+sce <- as.SingleCellExperiment(seurat)
+
+sce$seurat_clusters
+
+############# Calculate doublets #########################
+
+sce <- scDblFinder(sce, clusters = "seurat_clusters")
+
+sce$scDblFinder.score ##### Check score; higher score, greater chance of doublet
+
+sce$scDblFinder.class ### Check class; singlet or doublet 
+
+########## Assign score and class back to seurat object ###############
+
+seurat$scDblFinder.score <- sce$scDblFinder.score
+
+seurat$scDblFinder.class <- sce$scDblFinder.class
+
+
+########### Visualize ################
+
+DimPlot(seurat, reduction = "umap", group.by = "scDblFinder.class")
+
+######### Subset the singlets only ##################
+
+seurat <- subset(seurat, subset = scDblFinder.class == "singlet")
+
+
+################## STEP-12: RE-CLUSTER THE CELLS ####################
+
+seurat <- FindVariableFeatures(seurat, nfeatures = 2000) ### Find Variable features
+
+seurat <- ScaleData(seurat) ### Scale the data
+
+seurat <- RunPCA(seurat, npcs = 50) ### PCA
+
+ElbowPlot(seurat, ndims = ncol(Embeddings(seurat, "pca"))) ### Plot PCs
+
+seurat <- RunUMAP(seurat, dims = 1:20) ### Non-Linear dimensionality reduction; UMAP
+
+seurat <- FindNeighbors(seurat, dims = 1:20) ### Find neighbors
+
+seurat <- FindClusters(seurat, resolution = 0.1) ### Find clusters
+
+DimPlot(seurat, reduction = "umap", label = TRUE) ### Plot the clusters
+
+### 12 Clusters identified
+
+################ STEP-13: FIND MARKERS OF EACH CLUSTER ##################
+
+#### Clusters 3 & 11 are almost merged together #############
+
+#### First check if there is an actual biological difference between clusters 3 & 11 ######
+
+?FindMarkers
+diff_3_11 <- FindMarkers(seurat,
+                         ident.1 = 3,
+                         ident.2 = 11,
+                         min.pct = 0.25,
+                         logfc.threshold = 0.25)
+head(diff_3_11, 10)
+
+##### The p-values are significant, showing that they are different clusters #####
+
+########### Find Markers of All Clusters ##################
+
+cl_markers <- FindAllMarkers(seurat, only.pos = TRUE, min.pct = 0.25, logfc.threshold = log(1.2))
+
+top10_cl_markers <- cl_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+
+DoHeatmap(seurat, features = top10_cl_markers$gene) + NoLegend()
 
