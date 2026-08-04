@@ -13,6 +13,7 @@ library(Seurat)
 library(patchwork)
 library(AnnotationDbi)
 library(EnsDb.Hsapiens.v86)
+library(ggplot2)
 
 
 
@@ -323,5 +324,186 @@ cl_markers <- FindAllMarkers(seurat, only.pos = TRUE, min.pct = 0.25, logfc.thre
 
 top10_cl_markers <- cl_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
 
-DoHeatmap(seurat, features = top10_cl_markers$gene) + NoLegend()
+write.csv(cl_markers, "Results/markers.csv")
+
+
+#################### STEP-14: ANNOTATE CELL CLUSTERS ########################
+
+###### Visualize some cell markers to see theri expression in clusters ##########
+
+######## Check the expression of each marker with known literature ########
+
+####### Original Study: https://pmc.ncbi.nlm.nih.gov/articles/PMC9050543/ ####
+
+##### Another: https://doi.org/10.1101/2025.08.26.672469 #######
+
+######### Astrocytes: AQP4 & GFAP ###################
+#### AQP4: Cluster 2 & 8
+#### GFAP: Cluster 2,4,6,7,8 & 10
+
+######### Oligodendrocytes: MBP, MOBP, MOG & OPALIN ###########
+#### MOG & MOBP: Clusters 0,1 & 11
+#### OPALIN: Cluster 0
+
+########### Oligodendrocyte Precursor Cells (OPCs): VCAN, PDGFRA, PCDH15 ###########
+##### VCAN: Clusters 2,4 & 8
+##### PDGFRA: Clusters 4
+##### PCDH15: Clusters 4,5 & 9
+
+############ Ependymal Cells: FOXJ1 ###############
+#### FOXJ1: Cluster 8
+
+############# Microglia: CD74 & APBB1IP #################
+#### CD74: Clusters 3,6 & 11
+#### APBB1IP: Clusters 3 & 11
+
+################ Endothelial Cells: CLDN5 ###################
+##### CLDN5: Clusters 6 & 7
+
+################## Excitatory Neurons: SLC17A6 ##############
+##### SLC17A6: Cluster 5
+
+################### Inhibitory Neurons: GAD1 & GAD2 ################
+##### GAD1: Clusters 4,5 & 9
+##### GAD2: Clusters 5 & 9
+
+#################### GABAergic Neurons: GAD2 & GRIK1 ###############
+##### GAD2: Clusters 5 & 9
+##### GRIK1: Clusters 4,5 & 9
+
+################## Dopaminergic Neurons: TH #################
+##### TH: Not detectable in any clusters. 
+
+
+##########  Define a vector of canonical markers ############
+
+markers <- c(
+  "AQP4", "GFAP",          # Astrocytes
+  "MOBP", "MBP", "MOG", "OPALIN",    # Oligodendrocytes
+  "PDGFRA", "VCAN", "PCDH15",  # OPCs
+  "FOXJ1",                  # Ependymal cells
+  "CD74", "APBB1IP",       # Microglia
+  "CLDN5",                 # Endothelial
+  "SLC17A6",  # Excitatory Neurons
+  "GAD1", "GAD2", # Inhibitory Neurons
+  "GRIK1", # GABAergic Neurons
+  "TH", "SLC6A3", "ALDH1A1", "NR4A2", "SLC18A2", #Dopaminergic Neurons
+  "PDGFRB", "RGS5", "NOTCH3", "ABCC9", # Pericytes
+  "CADPS2" # Mentioned in paper
+)
+
+#######  Generate DotPlot to check the no of cells expressing markers ######
+
+DotPlot(seurat, features = markers) + 
+  RotatedAxis() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+######## Violin Plot ##########
+
+VlnPlot(seurat, features = markers, pt.size = 0)
+
+table(Idents(seurat))
+
+########### Find markers of unambiguous clusters ##################
+
+cluster5.markers <- FindMarkers(seurat,
+                                ident.1 = 5,
+                                only.pos = TRUE,
+                                min.pct = 0.25,
+                                logfc.threshold = 0.25)
+
+head(cluster5.markers, 50)
+
+cluster9.markers <- FindMarkers(seurat,
+                                ident.1 = 9,
+                                only.pos = TRUE,
+                                min.pct = 0.25,
+                                logfc.threshold = 0.25)
+
+head(cluster9.markers, 50)
+
+cluster10.markers <- FindMarkers(seurat,
+                                 ident.1 = 10,
+                                 only.pos = TRUE,
+                                 min.pct = 0.25,
+                                 logfc.threshold = 0.25)
+
+head(cluster10.markers, 50)
+View(cluster10.markers)
+
+cluster11.markers <- FindMarkers(seurat,
+                                 ident.1 = 11,
+                                 only.pos = TRUE,
+                                 min.pct = 0.25,
+                                 logfc.threshold = 0.25)
+
+head(cluster11.markers, 50)
+
+cluster8.marker <- FindMarkers(seurat,
+                               ident.1 = 8,
+                               only.pos = TRUE,
+                               min.pct = 0.25,
+                               logfc.threshold = 0.25)
+
+head(cluster8.marker, 50)
+
+
+############## ANNOTATE CLUSTERS BASED ON MARKER EXPRESSION #############
+
+markers <- c(
+  "AQP4", "GFAP",          # Astrocytes
+  "MOBP", "MBP", "MOG", "OPALIN",    # Oligodendrocytes
+  "PDGFRA", "VCAN", "PCDH15",  # OPCs
+  "FOXJ1",                  # Ependymal cells
+  "CD74", "APBB1IP",       # Microglia
+  "CLDN5",                 # Endothelial
+  "SLC17A6",  # Excitatory Neurons
+  "GAD1", "GAD2", # Inhibitory Neurons
+  "GRIK1", # GABAergic Neurons
+  "TH", "SLC6A3", "ALDH1A1", "NR4A2", "SLC18A2", #Dopaminergic Neurons
+  "PDGFRB", "RGS5", "NOTCH3", "ABCC9", # Pericytes
+  "CADPS2",  # Mentioned in paper
+  "ITK", "IL7R", "CD96" # T-cells Cluster 11 markers
+)
+
+#######  Generate DotPlot to check the no of cells expressing markers ######
+
+DotPlot(seurat, features = markers) + 
+  RotatedAxis() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+########### Final Annotation based on cell markers ############
+
+# 0 : OPALIN+ Oligodendrocytes
+# 1 : Oligodendrocytes
+# 2 : Astrocytes 
+# 3 : Microglia
+# 4 : Oligodendrocytes precursor cells (OPCs)
+# 5 : Excitatory Neurons
+# 6 : Endothelial Cells
+# 7 : Pericytes
+# 8 : Ependymal Cells
+# 9 : Inhibitory Neurons
+# 10 : CADPS2
+# 11 : T-Lymphocyte. 
+
+
+new_ident <- setNames(c("OPALIN+ Oligodendrocytes",
+                        "Oligodendrocytes",
+                        "Astrocytes",
+                        "Microglia",
+                        "Oligodendrocytes precursor cells (OPCs)",
+                        "Excitatory Neurons",
+                        "Endothelial Cells",
+                        "Pericytes",
+                        "Ependymal Cells",
+                        "Inhibitory Neurons",
+                        "CADPS2+",
+                        "T cells"),
+                      levels(seurat))
+
+seurat <- RenameIdents(seurat, new_ident)
+
+DimPlot(seurat, reduction = "umap", label = TRUE)
 
