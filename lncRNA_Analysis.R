@@ -13,9 +13,9 @@ library(Seurat)
 library(patchwork)
 library(AnnotationDbi)
 library(EnsDb.Hsapiens.v86)
+library(harmony)
+library(scDblFinder)
 library(ggplot2)
-
-
 
 
 ############ STEP-1: LOAD THE DATA #####################
@@ -51,6 +51,7 @@ head(features)
 
 dim(features)
 
+
 ########### Rename matrix rows as per gene names ##############
 
 rownames(counts_matrix) <- make.unique(as.character(features[,1]))
@@ -69,134 +70,40 @@ seurat <- CreateSeuratObject(counts_matrix, project="PD")
 
 seurat
 
-###################### STEP-3: QUALITY CONTROL ##############################
 
-########## Remove cells with too few or too many genes ############
+################## STEP-3: ADD METADATA INFORMATION TO SEURAT OBJECT ###########
 
-######### Filter out high mitochondrial percentages ###############
+######### Compare column names of seurat & barcodes ############
 
-seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, pattern = "^MT-")
+head(colnames(seurat)) ### Check column names of seurat
 
-summary(seurat$percent.mt) ##### Returns 0 mitochondrial genes. 
+head(barcodes$barcode) ### Should match the seurat column names
 
-####### Since features are in ensemble format, calculate percent.mt manually ########
+sum(barcodes$barcode %in% colnames(seurat)) ### 41435
 
+ncol(seurat) ### 41435
 
-######### Obtain complete list of mitochondrial genes from biomart ensemble ################
+rownames(barcodes) <- barcodes$barcode #### Change the rownames 
 
-mt_ensembl <- read.table("Data/mito_id.txt", sep="\t", header=TRUE)
+#### Add metadata directly from barcodes ########
 
-mt_ensembl
+seurat <- AddMetaData(seurat, metadata = barcodes)
 
-######## Match these IDs against rownames of counts matrix ################
+###### Add condition column to metadata ##########
 
-mt_features <- intersect(mt_ensembl$Gene.stable.ID, rownames(seurat))
+table(seurat$patient, seurat$condition)
 
-############ Calculate percent.mt #####################
+seurat$condition <- ifelse(grepl("PD", seurat$patient), "PD", "Control")
 
-seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, features = mt_features)
+seurat@meta.data
 
-summary(seurat$percent.mt) ###### Returns percent.mt 
+################ STEP-4: ADD GENE SYMBOLS AS ROWNAMES ##############
 
-################ Plot the features, counts and percent.mt ##################
+###### The current rownames/gene ids are ensemble ids #########
 
-VlnPlot(seurat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+rownames(seurat)
 
-#### Violin plot & percent.mt shows that no true mitochondrial genes exist in dataset #########
-
-####### Check if the no of genes & no of transcripts are correlated across cells ########
-
-
-corr.plot <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
-
-corr.plot
-
-##### Corr.plot shows that as number of genes increases, the transcript out also increase ######
-
-
-################### STEP-4: FILTERING ##################################
-
-######### Filtering cells with > 1500 UMIs per cell, > 1000 genes per cell & percent.mt < 10% #######
-
-###### These filtering thresholds are obtained from original paper ############
-
-#### Any cell that shows < 1500 UMIs & 1000 genes & > 10% mtDNA will be filtered #######
-
-seurat <- subset(seurat, subset = nFeature_RNA > 1000 & nCount_RNA > 1500 & percent.mt < 10)
-
-
-################# STEP-5: NORMALIZATION ##############################
-
-#### Make gene expression levels comparable between cells ################
-
-seurat <- NormalizeData(seurat)
-
-
-#################### STEP-6: FIND TOP VARIABLE FEATURES ######################
-
-####### Identify genes with most variable expression across cells ############
-
-seurat <- FindVariableFeatures(seurat, nfeatures = 2000)
-
-seurat
-
-
-##################### STEP-7: SCALING DATA ############################
-
-seurat <- ScaleData(seurat)
-
-seurat
-
-################### STEP-8: PRINCIPAL COMPONENT ANALYSIS ####################
-
-########## Dimensionality reduction #################
-
-seurat <- RunPCA(seurat, npcs = 50)
-
-
-ElbowPlot(seurat, ndims = ncol(Embeddings(seurat, "pca")))
-
-########## Elbow plot shows that first 15-20 PCs explain the most variance #######
-
-
-##################### STEP-8: NON-LINEAR DIMENSIONALITY REDUCTION ##############
-
-seurat <- RunTSNE(seurat, dims = 1:20)
-
-seurat <- RunUMAP(seurat, dims = 1:20)
-
-######### Visualize UMAP & tSNE ##################
-
-plot1 <- TSNEPlot(seurat)
-plot2 <- UMAPPlot(seurat)
-plot1 + plot2
-
-#### Selecting UMAP as it preserves local and global structure of dataset ####
-
-
-################ STEP-9: CLUSTER THE CELLS ########################
-
-seurat <- FindNeighbors(seurat, dims = 1:20)
-
-seurat <- FindClusters(seurat, resolution = 1)
-
-########## Change the resolution to check the number of clusters ##########
-
-seurat <- FindClusters(seurat, resolution = 0.2)
-
-seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 13 clusters 
-
-
-seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 15 clusters 
-
-
-DimPlot(seurat, reduction = "umap", label = TRUE)
-
-######### Final resolution: 0.1 ##################
-
-################## STEP-10: ADD GENE SYMBOLS TO THE DATA ##################
-
-######### The current dataset has ensemble ids #############
+###### Convert the ensemble ids to gene symbols ########
 
 ######## Add gene symbols for better understanding ###########
 
@@ -205,6 +112,7 @@ gene_map <- ensembldb::select(EnsDb.Hsapiens.v86, keys = rownames(seurat),
 
 gene_map <- gene_map[!duplicated(gene_map$GENEID), ]  #### keep mapping per Ensembl ID
 
+
 seurat[["RNA"]]@meta.data$symbol <- gene_map$SYMBOL[match(rownames(seurat), gene_map$GENEID)]
 
 
@@ -212,13 +120,6 @@ seurat[["RNA"]]@meta.data$symbol <- gene_map$SYMBOL[match(rownames(seurat), gene
 
 sum(is.na(seurat[["RNA"]]@meta.data$symbol)) ##### Check the number of NA ids
 
-########## Get the list of NA ids #########################
-
-na_ids <- rownames(seurat)[is.na(seurat[["RNA"]]@meta.data$symbol)]
-
-length(na_ids) ##### 192 Genes have NA symbol 
-
-na_ids
 
 ########## Assign the ensemble id back to the NA symbol ##########
 
@@ -233,34 +134,58 @@ seurat[["RNA"]]@meta.data$symbol <- symbol_col
 sum(is.na(seurat[["RNA"]]@meta.data$symbol))  # should now be 0
 
 seurat[["RNA"]]@meta.data$symbol
+###################### STEP-5: QUALITY CONTROL ##############################
+
+########## Remove cells with too few or too many genes ############
+
+######### Filter out high mitochondrial percentages ###############
+
+seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, pattern = "^MT-")
+
+summary(seurat$percent.mt) ##### Returns 0 mitochondrial genes. 
 
 
-################### STEP-11: REMOVE DOUBLETS #######################
-saveRDS(seurat, file = "seurat.rds")
+################ Plot the features, counts and percent.mt ##################
+
+VlnPlot(seurat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+
+#### Violin plot & percent.mt shows that no true mitochondrial genes exist in dataset #########
+
+####### Check if the no of genes & no of transcripts are correlated across cells ########
 
 
-symbols <- ifelse(is.na(seurat[["RNA"]]@meta.data$symbol), rownames(seurat), seurat[["RNA"]]@meta.data$symbol)
+corr.plot <- FeatureScatter(seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
 
-valid.symbols <- make.unique(symbols)
+corr.plot
 
-######### Assin symbols to rownames ##################
 
-rownames(seurat[["RNA"]]) <- valid.symbols
+##### Corr.plot shows that as number of genes increases, the transcript no. also increase ######
 
-rownames(seurat@assays$RNA) <- valid.symbols
 
-################ STEP-11: REMOVE DOUBLETS ################################
+################### STEP-6: FILTERING ##################################
+
+######### Filtering cells with > 1500 UMIs per cell, > 1000 genes per cell & percent.mt < 10% #######
+
+###### These filtering thresholds are obtained from original paper ############
+
+#### Any cell that shows < 1500 UMIs & 1000 genes & > 10% mtDNA will be filtered #######
+
+seurat <- subset(seurat, subset = nFeature_RNA > 1000 & nCount_RNA > 1500 & percent.mt < 10)
+
+seurat
+
+################ STEP-7: REMOVE DOUBLETS ################################
+
 ########### Using scDblFinder ######################
 
 ###### Convert seurat object to SingleCellExperiment ###################
 
 sce <- as.SingleCellExperiment(seurat)
 
-sce$seurat_clusters
 
 ############# Calculate doublets #########################
 
-sce <- scDblFinder(sce, clusters = "seurat_clusters")
+sce <- scDblFinder(sce)
 
 sce$scDblFinder.score ##### Check score; higher score, greater chance of doublet
 
@@ -275,61 +200,153 @@ seurat$scDblFinder.class <- sce$scDblFinder.class
 
 ########### Visualize ################
 
-DimPlot(seurat, reduction = "umap", group.by = "scDblFinder.class")
+#### See total Singlets vs Doublets count ####
+
+table(seurat$scDblFinder.class)
+
+##### Breakdown of doublets per patient sample #####
+
+table(seurat$patient, seurat$scDblFinder.class)
+
+###### Barplot of Doublets per Patient ######
+
+ggplot(as.data.frame(seurat@meta.data), aes(x = patient, fill = scDblFinder.class)) +
+  geom_bar(position = "fill") +
+  theme_minimal() +
+  labs(y = "Proportion", title = "Doublet Proportion by Patient")
 
 ######### Subset the singlets only ##################
 
 seurat <- subset(seurat, subset = scDblFinder.class == "singlet")
 
+################# STEP-8: NORMALIZATION ##############################
 
-################## STEP-12: RE-CLUSTER THE CELLS ####################
+#### Make gene expression levels comparable between cells ################
 
-seurat <- FindVariableFeatures(seurat, nfeatures = 2000) ### Find Variable features
+seurat <- NormalizeData(seurat)
 
-seurat <- ScaleData(seurat) ### Scale the data
 
-seurat <- RunPCA(seurat, npcs = 50) ### PCA
+#################### STEP-9: FIND TOP VARIABLE FEATURES ######################
 
-ElbowPlot(seurat, ndims = ncol(Embeddings(seurat, "pca"))) ### Plot PCs
+####### Identify genes with most variable expression across cells ############
 
-seurat <- RunUMAP(seurat, dims = 1:20) ### Non-Linear dimensionality reduction; UMAP
+seurat <- FindVariableFeatures(seurat, nfeatures = 2000)
 
-seurat <- FindNeighbors(seurat, dims = 1:20) ### Find neighbors
+seurat
 
-seurat <- FindClusters(seurat, resolution = 0.1) ### Find clusters
+##################### STEP-10: SCALING DATA ############################
 
-DimPlot(seurat, reduction = "umap", label = TRUE) ### Plot the clusters
+seurat <- ScaleData(seurat)
 
-### 12 Clusters identified
+seurat
 
-################ STEP-13: FIND MARKERS OF EACH CLUSTER ##################
+################### STEP-11: PRINCIPAL COMPONENT ANALYSIS ####################
 
-#### Clusters 3 & 11 are almost merged together #############
+########## Dimensionality reduction #################
 
-#### First check if there is an actual biological difference between clusters 3 & 11 ######
+seurat <- RunPCA(seurat, npcs = 50)
 
-?FindMarkers
-diff_3_11 <- FindMarkers(seurat,
-                         ident.1 = 3,
-                         ident.2 = 11,
-                         min.pct = 0.25,
-                         logfc.threshold = 0.25)
-head(diff_3_11, 10)
 
-##### The p-values are significant, showing that they are different clusters #####
+ElbowPlot(seurat, ndims = ncol(Embeddings(seurat, "pca")))
 
-########### Find Markers of All Clusters ##################
+
+########## Elbow plot shows that first 20 PCs explain the most variance #######
+
+################# STEP-12: BATCH CORRECTION ##########################
+
+######## Using Harmony ####################
+
+########### Run UMAP before and after Harmony to check batch correction ####
+
+seurat <- RunUMAP(seurat, reduction = "pca", 
+                  dims = 1:20, 
+                  reduction.name = "umap.unintegrated")
+
+plot1 <- DimPlot(seurat, reduction = "umap.unintegrated", 
+              group.by = "patient") + ggtitle("Before Harmony")
+
+plot1
+
+############ Run Harmony for Batch Correction ###############
+?RunHarmony
+seurat <- RunHarmony(seurat, 
+                     group.by.vars = "patient", 
+                     dims.use = 1:20, max_iter = 50)
+
+
+##################### STEP-13: NON-LINEAR DIMENSIONALITY REDUCTION ##############
+
+######## UMAP ###########
+
+seurat <- RunUMAP(seurat, reduction = "harmony", 
+                  dims = 1:20, reduction.name = "umap")
+
+
+####### Plot to see the difference #################
+
+plot2 <- DimPlot(seurat, reduction = "umap", 
+              group.by = "patient") + ggtitle("After Harmony")
+
+plot2
+
+
+plot1 + plot2 #### See if the batch correction was applied correctly
+
+################ STEP-14: CLUSTER THE CELLS ########################
+
+seurat <- FindNeighbors(seurat, dims = 1:20)
+
+seurat <- FindClusters(seurat, resolution = 1) ### Yields 25 clusters 
+
+
+########## Change the resolution to check the number of clusters ##########
+
+seurat <- FindClusters(seurat, resolution = 0.2) #### Yields 16 clusters 
+
+seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 13 clusters 
+
+
+DimPlot(seurat, reduction = "umap", label = TRUE)
+
+######### Final resolution: 0.1 ##################
+
+
+################ STEP-15: FIND MARKERS OF EACH CLUSTER ##################
 
 cl_markers <- FindAllMarkers(seurat, only.pos = TRUE, min.pct = 0.25, logfc.threshold = log(1.2))
 
 top10_cl_markers <- cl_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
 
+top10_cl_markers
+
 write.csv(cl_markers, "Results/markers.csv")
 
+saveRDS(seurat, "seurat.rds")
 
-#################### STEP-14: ANNOTATE CELL CLUSTERS ########################
+############# Convert ensemble ids to gene symbols ###########
 
-###### Visualize some cell markers to see theri expression in clusters ##########
+##### Direct vector match to map Ensembl IDs -> Symbols
+
+cl_markers$symbol <- seurat[["RNA"]]@meta.data$symbol[match(cl_markers$gene, rownames(seurat))]
+
+####### Get top 10 markers per cluster (now including the symbol column) #####
+
+top10_cl_markers <- cl_markers %>% 
+  group_by(cluster) %>% 
+  top_n(n = 10, wt = avg_log2FC)
+
+###### View results with readable symbols ########
+
+top10_cl_markers
+
+
+########### Update the rownames of seurat object as per gene symbols #########
+
+
+
+#################### STEP-16: ANNOTATE CELL CLUSTERS ########################
+
+###### Visualize some cell markers to see their expression in clusters ##########
 
 ######## Check the expression of each marker with known literature ########
 
@@ -338,6 +355,11 @@ write.csv(cl_markers, "Results/markers.csv")
 ##### Another: https://doi.org/10.1101/2025.08.26.672469 #######
 
 ######### Astrocytes: AQP4 & GFAP ###################
+DefaultAssay(seurat) <- "RNA"
+FeaturePlot(seurat, c("AQP4","GFAP"), ncol = 1)
+
+VlnPlot(seurat, features = c("AQP4","GFAP"), pt.size = 0)
+grep("AQP", rownames(seurat), value = TRUE)
 #### AQP4: Cluster 2 & 8
 #### GFAP: Cluster 2,4,6,7,8 & 10
 
@@ -506,4 +528,6 @@ new_ident <- setNames(c("OPALIN+ Oligodendrocytes",
 seurat <- RenameIdents(seurat, new_ident)
 
 DimPlot(seurat, reduction = "umap", label = TRUE)
+
+colnames(seurat)
 
