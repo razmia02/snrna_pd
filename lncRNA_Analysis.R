@@ -17,7 +17,6 @@ library(harmony)
 library(scDblFinder)
 library(ggplot2)
 
-
 ############ STEP-1: LOAD THE DATA #####################
 ?readMM
 
@@ -25,11 +24,19 @@ library(ggplot2)
 
 counts <- read.table("Data/GSE157783_UMI/midbrain_UMI.tsv", sep = "\t", header = TRUE)
 
+rownames(counts)
+
+dim(counts)
+
 ########### Convert to matrix ########################
 
 counts_matrix <- as(as.matrix(counts), "dgCMatrix")
 
 head(counts_matrix) ##### Check the structure of matrix
+
+rownames(counts_matrix)
+
+colnames(counts_matrix)
 
 dim(counts_matrix) ###### Check dimensions: rows as genes & columns as barcodes
 
@@ -43,6 +50,12 @@ head(barcodes)
 
 dim(barcodes)
 
+barcodes$barcode <- gsub("-", ".", barcodes$barcode)
+
+rownames(barcodes)
+
+colnames(barcodes)
+
 ########## Reading gene information #############
 
 features <- read.table("Data/GSE157783_genes/midbrain_genes.tsv", sep="\t", header=TRUE)
@@ -51,27 +64,54 @@ head(features)
 
 dim(features)
 
+rownames(features)
 
-########### Rename matrix rows as per gene names ##############
+colnames(features)
 
-rownames(counts_matrix) <- make.unique(as.character(features[,1]))
+########### Notice that gene column contains ensemble ids ###############
 
-head(rownames(counts_matrix))
+################ STEP-2: ADD GENE SYMBOLS AS ROWNAMES ##############
 
-############## Rename matrix columns to barcodes #################
+###### The current rownames/gene ids are ensemble ids #########
 
-colnames(counts_matrix) <- barcodes[,1]
+features$gene
 
-head(colnames(counts_matrix))
+###### Convert the ensemble ids to gene symbols ########
 
-######################## STEP-2: CREATE SEURAT OBJECT #########################
+######## Add gene symbols for better understanding ###########
+
+gene_map <- ensembldb::select(EnsDb.Hsapiens.v86, 
+                              keys = as.character(features$gene),
+                              keytype = "GENEID", columns = "SYMBOL")
+
+gene_map <- gene_map[!duplicated(gene_map$GENEID), ]  #### keep mapping per Ensembl ID
+
+
+symbols <- gene_map$SYMBOL[match(features$gene, gene_map$GENEID)]
+
+symbols[is.na(symbols)] <- features$gene[is.na(symbols)] 
+
+rownames(counts_matrix) <- make.unique(symbols) 
+
+rownames(counts_matrix)
+
+colnames(counts_matrix)
+
+head(counts_matrix)
+
+######################## STEP-3: CREATE SEURAT OBJECT #########################
 
 seurat <- CreateSeuratObject(counts_matrix, project="PD")
 
 seurat
 
+dim(seurat)
 
-################## STEP-3: ADD METADATA INFORMATION TO SEURAT OBJECT ###########
+rownames(seurat)
+
+Layers(seurat)
+
+################## STEP-4: ADD METADATA INFORMATION TO SEURAT OBJECT ###########
 
 ######### Compare column names of seurat & barcodes ############
 
@@ -95,45 +135,9 @@ table(seurat$patient, seurat$condition)
 
 seurat$condition <- ifelse(grepl("PD", seurat$patient), "PD", "Control")
 
-seurat@meta.data
-
-################ STEP-4: ADD GENE SYMBOLS AS ROWNAMES ##############
-
-###### The current rownames/gene ids are ensemble ids #########
-
-rownames(seurat)
-
-###### Convert the ensemble ids to gene symbols ########
-
-######## Add gene symbols for better understanding ###########
-
-gene_map <- ensembldb::select(EnsDb.Hsapiens.v86, keys = rownames(seurat),
-                              keytype = "GENEID", columns = "SYMBOL")
-
-gene_map <- gene_map[!duplicated(gene_map$GENEID), ]  #### keep mapping per Ensembl ID
+table(seurat$patient, seurat$condition)
 
 
-seurat[["RNA"]]@meta.data$symbol <- gene_map$SYMBOL[match(rownames(seurat), gene_map$GENEID)]
-
-
-############## Some genes have NA symbol #####################
-
-sum(is.na(seurat[["RNA"]]@meta.data$symbol)) ##### Check the number of NA ids
-
-
-########## Assign the ensemble id back to the NA symbol ##########
-
-symbol_col <- seurat[["RNA"]]@meta.data$symbol
-
-na_idx <- is.na(symbol_col)
-
-symbol_col[na_idx] <- rownames(seurat)[na_idx]
-
-seurat[["RNA"]]@meta.data$symbol <- symbol_col
-
-sum(is.na(seurat[["RNA"]]@meta.data$symbol))  # should now be 0
-
-seurat[["RNA"]]@meta.data$symbol
 ###################### STEP-5: QUALITY CONTROL ##############################
 
 ########## Remove cells with too few or too many genes ############
@@ -172,7 +176,7 @@ corr.plot
 
 seurat <- subset(seurat, subset = nFeature_RNA > 1000 & nCount_RNA > 1500 & percent.mt < 10)
 
-seurat
+seurat@meta.data$patient
 
 ################ STEP-7: REMOVE DOUBLETS ################################
 
@@ -182,10 +186,12 @@ seurat
 
 sce <- as.SingleCellExperiment(seurat)
 
+saveRDS(seurat, "seurat.rds")
 
 ############# Calculate doublets #########################
+?scDblFinder
 
-sce <- scDblFinder(sce)
+sce <- scDblFinder(sce, samples = "orig.ident")
 
 sce$scDblFinder.score ##### Check score; higher score, greater chance of doublet
 
@@ -296,12 +302,12 @@ plot1 + plot2 #### See if the batch correction was applied correctly
 
 seurat <- FindNeighbors(seurat, dims = 1:20)
 
-seurat <- FindClusters(seurat, resolution = 1) ### Yields 25 clusters 
+seurat <- FindClusters(seurat, resolution = 1) ### Yields 24 clusters 
 
 
 ########## Change the resolution to check the number of clusters ##########
 
-seurat <- FindClusters(seurat, resolution = 0.2) #### Yields 16 clusters 
+seurat <- FindClusters(seurat, resolution = 0.2) #### Yields 15 clusters 
 
 seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 13 clusters 
 
@@ -323,26 +329,6 @@ write.csv(cl_markers, "Results/markers.csv")
 
 saveRDS(seurat, "seurat.rds")
 
-############# Convert ensemble ids to gene symbols ###########
-
-##### Direct vector match to map Ensembl IDs -> Symbols
-
-cl_markers$symbol <- seurat[["RNA"]]@meta.data$symbol[match(cl_markers$gene, rownames(seurat))]
-
-####### Get top 10 markers per cluster (now including the symbol column) #####
-
-top10_cl_markers <- cl_markers %>% 
-  group_by(cluster) %>% 
-  top_n(n = 10, wt = avg_log2FC)
-
-###### View results with readable symbols ########
-
-top10_cl_markers
-
-
-########### Update the rownames of seurat object as per gene symbols #########
-
-
 
 #################### STEP-16: ANNOTATE CELL CLUSTERS ########################
 
@@ -355,120 +341,76 @@ top10_cl_markers
 ##### Another: https://doi.org/10.1101/2025.08.26.672469 #######
 
 ######### Astrocytes: AQP4 & GFAP ###################
-DefaultAssay(seurat) <- "RNA"
+
 FeaturePlot(seurat, c("AQP4","GFAP"), ncol = 1)
 
-VlnPlot(seurat, features = c("AQP4","GFAP"), pt.size = 0)
-grep("AQP", rownames(seurat), value = TRUE)
-#### AQP4: Cluster 2 & 8
-#### GFAP: Cluster 2,4,6,7,8 & 10
+VlnPlot(seurat, features = c("SLC6A3", "ALDH1A1", "NR4A2", "SLC18A2"), pt.size = 0)
+
+#### AQP4: Cluster 2 & 9
+#### GFAP: Cluster 2,5,6,7,9 & 11
 
 ######### Oligodendrocytes: MBP, MOBP, MOG & OPALIN ###########
-#### MOG & MOBP: Clusters 0,1 & 11
+#### MOG & MOBP: Clusters 0,1 & 12
+#### MBP: Clusters all except 9 & 11
 #### OPALIN: Cluster 0
 
 ########### Oligodendrocyte Precursor Cells (OPCs): VCAN, PDGFRA, PCDH15 ###########
-##### VCAN: Clusters 2,4 & 8
-##### PDGFRA: Clusters 4
-##### PCDH15: Clusters 4,5 & 9
+##### VCAN: Clusters 2,5 & 9
+##### PDGFRA: Clusters 5
+##### PCDH15: Clusters 3,5,8 & 10
 
 ############ Ependymal Cells: FOXJ1 ###############
-#### FOXJ1: Cluster 8
+#### FOXJ1: Cluster 9
 
 ############# Microglia: CD74 & APBB1IP #################
-#### CD74: Clusters 3,6 & 11
-#### APBB1IP: Clusters 3 & 11
+#### CD74: Clusters 4,6 & 12
+#### APBB1IP: Clusters 4 & 12
 
 ################ Endothelial Cells: CLDN5 ###################
 ##### CLDN5: Clusters 6 & 7
 
 ################## Excitatory Neurons: SLC17A6 ##############
-##### SLC17A6: Cluster 5
+##### SLC17A6: Cluster 3 & 10
 
 ################### Inhibitory Neurons: GAD1 & GAD2 ################
-##### GAD1: Clusters 4,5 & 9
-##### GAD2: Clusters 5 & 9
+##### GAD1: Clusters 3,5 & 8
+##### GAD2: Clusters 3 & 8
 
 #################### GABAergic Neurons: GAD2 & GRIK1 ###############
-##### GAD2: Clusters 5 & 9
-##### GRIK1: Clusters 4,5 & 9
+##### GAD2: Clusters 3 & 8
+##### GRIK1: Clusters 3,5,8 & 10
 
 ################## Dopaminergic Neurons: TH #################
 ##### TH: Not detectable in any clusters. 
 
 
-##########  Define a vector of canonical markers ############
-
-markers <- c(
-  "AQP4", "GFAP",          # Astrocytes
-  "MOBP", "MBP", "MOG", "OPALIN",    # Oligodendrocytes
-  "PDGFRA", "VCAN", "PCDH15",  # OPCs
-  "FOXJ1",                  # Ependymal cells
-  "CD74", "APBB1IP",       # Microglia
-  "CLDN5",                 # Endothelial
-  "SLC17A6",  # Excitatory Neurons
-  "GAD1", "GAD2", # Inhibitory Neurons
-  "GRIK1", # GABAergic Neurons
-  "TH", "SLC6A3", "ALDH1A1", "NR4A2", "SLC18A2", #Dopaminergic Neurons
-  "PDGFRB", "RGS5", "NOTCH3", "ABCC9", # Pericytes
-  "CADPS2" # Mentioned in paper
-)
-
-#######  Generate DotPlot to check the no of cells expressing markers ######
-
-DotPlot(seurat, features = markers) + 
-  RotatedAxis() + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-######## Violin Plot ##########
-
-VlnPlot(seurat, features = markers, pt.size = 0)
-
-table(Idents(seurat))
 
 ########### Find markers of unambiguous clusters ##################
 
-cluster5.markers <- FindMarkers(seurat,
-                                ident.1 = 5,
+cluster3.markers <- FindMarkers(seurat,
+                                ident.1 = 3,
                                 only.pos = TRUE,
                                 min.pct = 0.25,
                                 logfc.threshold = 0.25)
 
-head(cluster5.markers, 50)
+head(cluster3.markers, 50)
 
-cluster9.markers <- FindMarkers(seurat,
-                                ident.1 = 9,
+
+cluster8.markers <- FindMarkers(seurat,
+                                ident.1 = 8,
                                 only.pos = TRUE,
                                 min.pct = 0.25,
                                 logfc.threshold = 0.25)
 
-head(cluster9.markers, 50)
+head(cluster8.markers, 50) ### Inhibitory neurons markers
 
-cluster10.markers <- FindMarkers(seurat,
-                                 ident.1 = 10,
-                                 only.pos = TRUE,
-                                 min.pct = 0.25,
-                                 logfc.threshold = 0.25)
+markers_3v10 <- FindMarkers(seurat, ident.1 = 3, ident.2 = 10, 
+                            min.pct = 0.25, logfc.threshold = 0.25)
+head(markers_3v10, 30)
 
-head(cluster10.markers, 50)
-View(cluster10.markers)
+nrow(markers_3v10[markers_3v10$p_val_adj < 0.05, ])  # how many genes actually distinguish them
 
-cluster11.markers <- FindMarkers(seurat,
-                                 ident.1 = 11,
-                                 only.pos = TRUE,
-                                 min.pct = 0.25,
-                                 logfc.threshold = 0.25)
-
-head(cluster11.markers, 50)
-
-cluster8.marker <- FindMarkers(seurat,
-                               ident.1 = 8,
-                               only.pos = TRUE,
-                               min.pct = 0.25,
-                               logfc.threshold = 0.25)
-
-head(cluster8.marker, 50)
-
+########## Cluster 3 & 11 are both excitatory neurons but different subtypes ######
 
 ############## ANNOTATE CLUSTERS BASED ON MARKER EXPRESSION #############
 
@@ -480,7 +422,7 @@ markers <- c(
   "CD74", "APBB1IP",       # Microglia
   "CLDN5",                 # Endothelial
   "SLC17A6",  # Excitatory Neurons
-  "GAD1", "GAD2", # Inhibitory Neurons
+  "GAD1", "GAD2", "OTX2-AS1",  # Inhibitory Neurons
   "GRIK1", # GABAergic Neurons
   "TH", "SLC6A3", "ALDH1A1", "NR4A2", "SLC18A2", #Dopaminergic Neurons
   "PDGFRB", "RGS5", "NOTCH3", "ABCC9", # Pericytes
@@ -500,34 +442,35 @@ DotPlot(seurat, features = markers) +
 # 0 : OPALIN+ Oligodendrocytes
 # 1 : Oligodendrocytes
 # 2 : Astrocytes 
-# 3 : Microglia
-# 4 : Oligodendrocytes precursor cells (OPCs)
-# 5 : Excitatory Neurons
+# 3 : Excitatory Neurons (SubtypeA)
+# 4 : Microglia
+# 5 : OPCs
 # 6 : Endothelial Cells
 # 7 : Pericytes
-# 8 : Ependymal Cells
-# 9 : Inhibitory Neurons
-# 10 : CADPS2
-# 11 : T-Lymphocyte. 
+# 8 : Inhibitory Neurons
+# 9 : Ependymal cells
+# 10 : Excitatory Neurons (SubtypeB)
+# 11 : CADPS2+
+# 12 : T-lymphocyte
 
 
 new_ident <- setNames(c("OPALIN+ Oligodendrocytes",
                         "Oligodendrocytes",
                         "Astrocytes",
+                        "Excitatory Neurons (SubtypeA)",
                         "Microglia",
                         "Oligodendrocytes precursor cells (OPCs)",
-                        "Excitatory Neurons",
                         "Endothelial Cells",
                         "Pericytes",
-                        "Ependymal Cells",
                         "Inhibitory Neurons",
+                        "Ependymal Cells",
+                        "Excitatory Neurons (SubtypeB)",
                         "CADPS2+",
-                        "T cells"),
+                        "T lymphocytes"),
                       levels(seurat))
 
 seurat <- RenameIdents(seurat, new_ident)
 
 DimPlot(seurat, reduction = "umap", label = TRUE)
 
-colnames(seurat)
 
