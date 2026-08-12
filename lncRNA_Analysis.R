@@ -16,9 +16,7 @@ library(AnnotationDbi)
 library(EnsDb.Hsapiens.v86)
 library(scDblFinder)
 library(SingleCellExperiment)
-library(dplyr)
 library(harmony)
-library(scDblFinder)
 library(ggplot2)
 
 
@@ -316,9 +314,6 @@ seurat <- FindClusters(seurat, resolution = 0.2) #### Yields 15 clusters
 
 seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 13 clusters 
 
-seurat <- FindClusters(seurat, resolution = 0.1) ####### Yields 15 clusters 
-
-
 
 DimPlot(seurat, reduction = "umap", label = TRUE)
 
@@ -483,245 +478,6 @@ seurat <- RenameIdents(seurat, new_ident)
 DimPlot(seurat, reduction = "umap", label = TRUE)
 
 
-symbols <- ifelse(is.na(seurat[["RNA"]]@meta.data$symbol), rownames(seurat), seurat[["RNA"]]@meta.data$symbol)
-
-valid.symbols <- make.unique(symbols)
-
-######### Assin symbols to rownames ##################
-
-rownames(seurat[["RNA"]]) <- valid.symbols
-
-rownames(seurat@assays$RNA) <- valid.symbols
-
-################ STEP-11: REMOVE DOUBLETS ################################
-########### Using scDblFinder ######################
-?SingleCellExperiment
-###### Convert seurat object to SingleCellExperiment ###################
-
-sce <- as.SingleCellExperiment(seurat)
-
-sce$seurat_clusters
-
-############# Calculate doublets #########################
-
-sce <- scDblFinder(sce, clusters = "seurat_clusters")
-
-sce$scDblFinder.score ##### Check score; higher score, greater chance of doublet
-
-sce$scDblFinder.class ### Check class; singlet or doublet 
-
-########## Assign score and class back to seurat object ###############
-
-seurat$scDblFinder.score <- sce$scDblFinder.score
-
-seurat$scDblFinder.class <- sce$scDblFinder.class
-
-
-########### Visualize ################
-
-DimPlot(seurat, reduction = "umap", group.by = "scDblFinder.class")
-
-######### Subset the singlets only ##################
-
-seurat <- subset(seurat, subset = scDblFinder.class == "singlet")
-
-
-################## STEP-12: RE-CLUSTER THE CELLS ####################
-
-seurat <- FindVariableFeatures(seurat, nfeatures = 2000) ### Find Variable features
-
-seurat <- ScaleData(seurat) ### Scale the data
-
-seurat <- RunPCA(seurat, npcs = 50) ### PCA
-
-ElbowPlot(seurat, ndims = ncol(Embeddings(seurat, "pca"))) ### Plot PCs
-
-seurat <- RunUMAP(seurat, dims = 1:20) ### Non-Linear dimensionality reduction; UMAP
-
-seurat <- FindNeighbors(seurat, dims = 1:20) ### Find neighbors
-
-seurat <- FindClusters(seurat, resolution = 0.1) ### Find clusters
-
-DimPlot(seurat, reduction = "umap", label = TRUE) ### Plot the clusters
-
-### 12 Clusters identified
-
-################ STEP-13: FIND MARKERS OF EACH CLUSTER ##################
-
-#### Clusters 3 & 11 are almost merged together #############
-
-#### First check if there is an actual biological difference between clusters 3 & 11 ######
-
-?FindMarkers
-diff_3_11 <- FindMarkers(seurat,
-                         ident.1 = 3,
-                         ident.2 = 11,
-                         min.pct = 0.25,
-                         logfc.threshold = 0.25)
-head(diff_3_11, 10)
-
-##### The p-values are significant, showing that they are different clusters #####
-
-########### Find Markers of All Clusters ##################
-
-cl_markers <- FindAllMarkers(seurat, only.pos = TRUE, min.pct = 0.25, logfc.threshold = log(1.2))
-
-top10_cl_markers <- cl_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
-
-DoHeatmap(seurat, features = top10_cl_markers$gene) + NoLegend()
-
-top10_cl_markers
-
-write.csv(cl_markers, "Results/markers.csv")
-
-saveRDS(seurat, "seurat.rds")
-
-
-#################### STEP-16: ANNOTATE CELL CLUSTERS ########################
-
-###### Visualize some cell markers to see their expression in clusters ##########
-
-######## Check the expression of each marker with known literature ########
-
-####### Original Study: https://pmc.ncbi.nlm.nih.gov/articles/PMC9050543/ ####
-
-##### Another: https://doi.org/10.1101/2025.08.26.672469 #######
-
-######### Astrocytes: AQP4 & GFAP ###################
-
-FeaturePlot(seurat, c("AQP4","GFAP"), ncol = 1)
-
-VlnPlot(seurat, features = c("SLC6A3", "ALDH1A1", "NR4A2", "SLC18A2"), pt.size = 0)
-
-#### AQP4: Cluster 2 & 9
-#### GFAP: Cluster 2,5,6,7,9 & 11
-
-######### Oligodendrocytes: MBP, MOBP, MOG & OPALIN ###########
-#### MOG & MOBP: Clusters 0,1 & 12
-#### MBP: Clusters all except 9 & 11
-#### OPALIN: Cluster 0
-
-########### Oligodendrocyte Precursor Cells (OPCs): VCAN, PDGFRA, PCDH15 ###########
-##### VCAN: Clusters 2,5 & 9
-##### PDGFRA: Clusters 5
-##### PCDH15: Clusters 3,5,8 & 10
-
-############ Ependymal Cells: FOXJ1 ###############
-#### FOXJ1: Cluster 9
-
-############# Microglia: CD74 & APBB1IP #################
-#### CD74: Clusters 4,6 & 12
-#### APBB1IP: Clusters 4 & 12
-
-################ Endothelial Cells: CLDN5 ###################
-##### CLDN5: Clusters 6 & 7
-
-################## Excitatory Neurons: SLC17A6 ##############
-##### SLC17A6: Cluster 3 & 10
-
-################### Inhibitory Neurons: GAD1 & GAD2 ################
-##### GAD1: Clusters 3,5 & 8
-##### GAD2: Clusters 3 & 8
-
-#################### GABAergic Neurons: GAD2 & GRIK1 ###############
-##### GAD2: Clusters 3 & 8
-##### GRIK1: Clusters 3,5,8 & 10
-
-################## Dopaminergic Neurons: TH #################
-##### TH: Not detectable in any clusters. 
-
-
-
-########### Find markers of unambiguous clusters ##################
-
-cluster3.markers <- FindMarkers(seurat,
-                                ident.1 = 3,
-                                only.pos = TRUE,
-                                min.pct = 0.25,
-                                logfc.threshold = 0.25)
-
-head(cluster3.markers, 50)
-
-
-cluster8.markers <- FindMarkers(seurat,
-                                ident.1 = 8,
-                                only.pos = TRUE,
-                                min.pct = 0.25,
-                                logfc.threshold = 0.25)
-
-head(cluster8.markers, 50) ### Inhibitory neurons markers
-
-markers_3v10 <- FindMarkers(seurat, ident.1 = 3, ident.2 = 10, 
-                            min.pct = 0.25, logfc.threshold = 0.25)
-head(markers_3v10, 30)
-
-nrow(markers_3v10[markers_3v10$p_val_adj < 0.05, ])  # how many genes actually distinguish them
-
-########## Cluster 3 & 11 are both excitatory neurons but different subtypes ######
-
-############## ANNOTATE CLUSTERS BASED ON MARKER EXPRESSION #############
-
-markers <- c(
-  "AQP4", "GFAP",          # Astrocytes
-  "MOBP", "MBP", "MOG", "OPALIN",    # Oligodendrocytes
-  "PDGFRA", "VCAN", "PCDH15",  # OPCs
-  "FOXJ1",                  # Ependymal cells
-  "CD74", "APBB1IP",       # Microglia
-  "CLDN5",                 # Endothelial
-  "SLC17A6",  # Excitatory Neurons
-  "GAD1", "GAD2", "OTX2-AS1",  # Inhibitory Neurons
-  "GRIK1", # GABAergic Neurons
-  "TH", "SLC6A3", "ALDH1A1", "NR4A2", "SLC18A2", #Dopaminergic Neurons
-  "PDGFRB", "RGS5", "NOTCH3", "ABCC9", # Pericytes
-  "CADPS2",  # Mentioned in paper
-  "ITK", "IL7R", "CD96" # T-cells Cluster 11 markers
-)
-
-#######  Generate DotPlot to check the no of cells expressing markers ######
-
-DotPlot(seurat, features = markers) + 
-  RotatedAxis() + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-
-########### Final Annotation based on cell markers ############
-
-# 0 : OPALIN+ Oligodendrocytes
-# 1 : Oligodendrocytes
-# 2 : Astrocytes 
-# 3 : Excitatory Neurons (SubtypeA)
-# 4 : Microglia
-# 5 : OPCs
-# 6 : Endothelial Cells
-# 7 : Pericytes
-# 8 : Inhibitory Neurons
-# 9 : Ependymal cells
-# 10 : Excitatory Neurons (SubtypeB)
-# 11 : CADPS2+
-# 12 : T-lymphocyte
-
-
-new_ident <- setNames(c("OPALIN+ Oligodendrocytes",
-                        "Oligodendrocytes",
-                        "Astrocytes",
-                        "Excitatory Neurons (SubtypeA)",
-                        "Microglia",
-                        "Oligodendrocytes precursor cells (OPCs)",
-                        "Endothelial Cells",
-                        "Pericytes",
-                        "Inhibitory Neurons",
-                        "Ependymal Cells",
-                        "Excitatory Neurons (SubtypeB)",
-                        "CADPS2+",
-                        "T lymphocytes"),
-                      levels(seurat))
-
-seurat <- RenameIdents(seurat, new_ident)
-
-DimPlot(seurat, reduction = "umap", label = TRUE)
-
-saveRDS(seurat, "seurat.rds")
-
 ##################### STEP-17: IDENTIFYING LncRNAS #######################
 
 ######## Get lncRNA gene list ####################
@@ -745,25 +501,28 @@ lncrna_genes <- unique(biotype_map$SYMBOL[biotype_map$GENEBIOTYPE %in% lnc_bioty
 
 lncrna_genes <- intersect(lncrna_genes, rownames(seurat))
 
-length(lncrna_genes) ### 9084 lnRNAs in total
+length(lncrna_genes) ### 9073 lnRNAs in total
 
-rownames(seurat[["RNA"]]$data)
 ######## Average expression per cluster, restricted to lncRNAs ########
-
+?AverageExpression
 avg_expr <- AverageExpression(seurat, features = lncrna_genes, 
-                              group.by = "seurat_clusters", 
-                              slot = "data", 
-                              assay = "RNA")$RNA
+                              group.by = "seurat_clusters")
 
-DefaultAssay(seurat)
+write.csv(avg_expr, "Results/lncRNA_expression.csv")
 
 # avg_expr: rows = lncRNA genes, columns = clusters, linear-scale mean expression
 
-######## STEP 3: compare expression — standard DE, restricted to lncRNAs ########
+######## STEP 3: Compare expression — standard DE, restricted to lncRNAs ########
+
 lncrna_markers <- FindAllMarkers(seurat, features = lncrna_genes, 
                                  only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.25)
 
+head(lncrna_markers)
+
+write.csv(lncrna_markers, "Results/lncrna_markers.csv")
+
 ######## STEP 4: tau index — cluster-specificity score per lncRNA ########
+
 tau_calc <- function(x) {
   if (max(x) == 0) return(0)      # avoid divide-by-zero for all-zero genes
   x_hat <- x / max(x)
@@ -771,6 +530,7 @@ tau_calc <- function(x) {
 }
 
 tau_scores <- apply(avg_expr, 1, tau_calc)
+
 tau_df <- data.frame(gene = names(tau_scores), tau = tau_scores)
 tau_df <- tau_df[order(-tau_df$tau), ]
 head(tau_df, 20)   # most cluster-specific lncRNAs, ranked
