@@ -21,6 +21,7 @@ library(ggplot2)
 library(EnhancedVolcano)
 
 
+################################################################################
 
 ############ STEP-1: LOAD THE DATA #####################
 ?readMM
@@ -75,6 +76,9 @@ colnames(features)
 
 ########### Notice that gene column contains ensemble ids ###############
 
+
+################################################################################
+
 ################ STEP-2: ADD GENE SYMBOLS AS ROWNAMES ##############
 
 ###### The current rownames/gene ids are ensemble ids #########
@@ -104,6 +108,9 @@ colnames(counts_matrix)
 
 head(counts_matrix)
 
+
+################################################################################
+
 ######################## STEP-3: CREATE SEURAT OBJECT #########################
 
 seurat <- CreateSeuratObject(counts_matrix, project="PD")
@@ -115,6 +122,9 @@ dim(seurat)
 rownames(seurat)
 
 Layers(seurat)
+
+
+#################################################################################
 
 ################## STEP-4: ADD METADATA INFORMATION TO SEURAT OBJECT ###########
 
@@ -142,6 +152,8 @@ seurat$condition <- ifelse(grepl("PD", seurat$patient), "PD", "Control")
 
 table(seurat$patient, seurat$condition)
 
+
+################################################################################
 
 ###################### STEP-5: QUALITY CONTROL ##############################
 
@@ -171,6 +183,8 @@ corr.plot
 ##### Corr.plot shows that as number of genes increases, the transcript no. also increase ######
 
 
+################################################################################
+
 ################### STEP-6: FILTERING ##################################
 
 ######### Filtering cells with > 1500 UMIs per cell, > 1000 genes per cell & percent.mt < 10% #######
@@ -182,6 +196,9 @@ corr.plot
 seurat <- subset(seurat, subset = nFeature_RNA > 1000 & nCount_RNA > 1500 & percent.mt < 10)
 
 seurat@meta.data$patient
+
+
+################################################################################
 
 ################ STEP-7: REMOVE DOUBLETS ################################
 
@@ -230,12 +247,17 @@ ggplot(as.data.frame(seurat@meta.data), aes(x = patient, fill = scDblFinder.clas
 
 seurat <- subset(seurat, subset = scDblFinder.class == "singlet")
 
+
+################################################################################
+
 ################# STEP-8: NORMALIZATION ##############################
 
 #### Make gene expression levels comparable between cells ################
 
 seurat <- NormalizeData(seurat)
 
+
+################################################################################
 
 #################### STEP-9: FIND TOP VARIABLE FEATURES ######################
 
@@ -245,11 +267,17 @@ seurat <- FindVariableFeatures(seurat, nfeatures = 2000)
 
 seurat
 
+
+################################################################################
+
 ##################### STEP-10: SCALING DATA ############################
 
 seurat <- ScaleData(seurat)
 
 seurat
+
+
+################################################################################
 
 ################### STEP-11: PRINCIPAL COMPONENT ANALYSIS ####################
 
@@ -262,6 +290,9 @@ ElbowPlot(seurat, ndims = ncol(Embeddings(seurat, "pca")))
 
 
 ########## Elbow plot shows that first 20 PCs explain the most variance #######
+
+
+################################################################################
 
 ################# STEP-12: BATCH CORRECTION ##########################
 
@@ -285,6 +316,8 @@ seurat <- RunHarmony(seurat,
                      dims.use = 1:20, max_iter = 50)
 
 
+################################################################################
+
 ##################### STEP-13: NON-LINEAR DIMENSIONALITY REDUCTION ##############
 
 ######## UMAP ###########
@@ -302,6 +335,9 @@ plot2
 
 
 plot1 + plot2 #### See if the batch correction was applied correctly
+
+
+################################################################################
 
 ################ STEP-14: CLUSTER THE CELLS ########################
 
@@ -322,6 +358,8 @@ DimPlot(seurat, reduction = "umap", label = TRUE)
 ######### Final resolution: 0.1 ##################
 
 
+################################################################################
+
 ################ STEP-15: FIND MARKERS OF EACH CLUSTER ##################
 
 cl_markers <- FindAllMarkers(seurat, only.pos = TRUE, min.pct = 0.25, logfc.threshold = log(1.2))
@@ -336,6 +374,10 @@ saveRDS(seurat, "seurat.rds")
 
 
 ############## Some genes have NA symbol #####################
+
+
+################################################################################
+
 #################### STEP-16: ANNOTATE CELL CLUSTERS ########################
 
 ###### Visualize some cell markers to see their expression in clusters ##########
@@ -460,6 +502,7 @@ DotPlot(seurat, features = markers) +
 # 12 : T-lymphocyte
 
 
+
 new_ident <- setNames(c("OPALIN+ Oligodendrocytes",
                         "Oligodendrocytes",
                         "Astrocytes",
@@ -475,10 +518,16 @@ new_ident <- setNames(c("OPALIN+ Oligodendrocytes",
                         "T lymphocytes"),
                       levels(seurat))
 
+seurat <- RenameIdents(seurat, new_ident)
+
 seurat$cell_ontology <- Idents(seurat)
 
 DimPlot(seurat, reduction = "umap", label = TRUE)
 
+seurat@meta.data$cell_ontology
+
+
+################################################################################
 
 ##################### STEP-17: IDENTIFYING LncRNAS #######################
 
@@ -506,8 +555,7 @@ lncrna_genes <- intersect(lncrna_genes, rownames(seurat))
 length(lncrna_genes) ### 9073 lnRNAs in total
 
 ######## Average expression per cluster, restricted to lncRNAs ########
-?AverageExpression
-remove(avg_expr)
+
 avg_expr <- AverageExpression(seurat, features = lncrna_genes, 
                               group.by = "seurat_clusters")
 
@@ -527,7 +575,8 @@ avg_expr_num <- do.call(rbind, avg_expr)
 ######## STEP 3: Compare expression — standard DE, restricted to lncRNAs ########
 
 lncrna_markers <- FindAllMarkers(seurat, features = lncrna_genes, 
-                                 only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.25)
+                                 only.pos = TRUE, min.pct = 0.1, 
+                                 logfc.threshold = 0.25)
 
 head(lncrna_markers)
 
@@ -554,6 +603,7 @@ head(tau_df, 20)   # most cluster-specific lncRNAs, ranked
 write.csv(tau_df, "Results/tau_index.csv")
 
 
+################################################################################
 
 ################# STEP-18: FIND DIFFERENTIALLY EXPRESSED LNCRNAS ###########
 
@@ -678,15 +728,132 @@ EnhancedVolcano(
   subtitle = 'Volcano plot showing DE lncRNAs in Pericytes (PD vs Control)'
 )
 
+
+######## DE lncRNAs in Ependymal Cells (PD vs. Control) ############
+
+unique(seurat$celltype_condition)
+
+ependymal_de <- FindMarkers(
+  seurat,
+  ident.1 = "Ependymal Cells_PD",
+  ident.2 = "Ependymal Cells_Control",
+  features = rownames(avg_expr_num),
+  logfc.threshold = 0.25,
+  min.pct = 0.1
+)
+
+EnhancedVolcano(
+  ependymal_de,
+  lab = rownames(ependymal_de),
+  x = 'avg_log2FC',
+  y = 'p_val_adj',
+  pCutoff = 0.05,
+  FCcutoff = 0.5,
+  pointSize = 3.0,
+  labSize = 4.0,
+  title = 'lncRNAs: PD vs. Control',
+  subtitle = 'Volcano plot showing DE lncRNAs in Ependymal Cells (PD vs Control)'
+)
+
+######## DE lncRNAs in Ependymal Cells (PD vs. Control) ############
+
+unique(seurat$celltype_condition)
+
+oligodendrocytes_de <- FindMarkers(
+  seurat,
+  ident.1 = "Oligodendrocytes_PD",
+  ident.2 = "Oligodendrocytes_Control",
+  features = rownames(avg_expr_num),
+  logfc.threshold = 0.25,
+  min.pct = 0.1
+)
+
+EnhancedVolcano(
+  oligodendrocytes_de,
+  lab = rownames(oligodendrocytes_de),
+  x = 'avg_log2FC',
+  y = 'p_val_adj',
+  pCutoff = 0.05,
+  FCcutoff = 0.5,
+  pointSize = 3.0,
+  labSize = 4.0,
+  title = 'lncRNAs: PD vs. Control',
+  subtitle = 'Volcano plot showing DE lncRNAs in Oligodendrocytes (PD vs Control)'
+)
+
+
+############ Save the DE results in csv files ###############
+
 write.csv(pericyte_de, "Results/DElncRNAs_Pericytes.csv")
 write.csv(pd_microglia_deg, "Results/DElncRNAs_Microglia.csv")
 write.csv(astrocyte_de, "Results/DElncRNAs_Astrocytes.csv")
+write.csv(ependymal_de, "Results/DElncRNAs_Ependymal.csv")
+write.csv(oligodendrocytes_de, "Results/DElncRNAs_Oligodendrocytes.csv")
+
+
+######### Check the expression of specific lncRNAs known to be involved in PD ####
+
+###### NEAT1 Expression across clusters ###########
+
+neat1_expr <- AverageExpression(seurat, features = "NEAT1", group.by = "cell_ontology")$RNA
+
+###### Sorting ############
+
+sort(neat1_expr["NEAT1", ], decreasing = TRUE)
+
+
+df_neat1 <- data.frame(CellType = colnames(neat1_expr), NEAT1 = as.vector(neat1_expr))
+
+# 2. Plot
+ggplot(df_neat1, aes(x = reorder(CellType, -NEAT1), y = NEAT1)) +
+  geom_col(fill = "steelblue") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Cell Type", y = "Average NEAT1 Expression", 
+       title = "NEAT1 Expression Across Cell Types")
+
+
+
+######## Check the expression of multiple lncRNA ############
+
+target_lncs <- intersect(c("NEAT1", "MALAT1", "MEG3", "MIAT", "SNHG1", "H19"), rownames(seurat))
+
+#### Get average expression and reshape into long format for ggplot #####
+
+df_multi <- as.data.frame(AverageExpression(seurat, features = target_lncs, group.by = "cell_ontology")$RNA)
+df_multi$Gene <- rownames(df_multi)
+df_long <- reshape2::melt(df_multi, id.vars = "Gene", variable.name = "CellType", value.name = "Expression")
+
+####### Plot Grouped Bar Plot ########
+
+ggplot(df_long, aes(x = reorder(CellType, -Expression), y = Expression, fill = Gene)) +
+  geom_col(show.legend = FALSE) +
+  
+  # Separate panel per lncRNA with individual Y-axis scales
+  facet_wrap(~Gene, scales = "free_y", ncol = 2) +
+  
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 8, face = "bold"),
+    strip.background = element_rect(fill = "grey90", color = "black"), # Header panel style
+    strip.text = element_text(face = "bold.italic", size = 11)        # Bold italic lncRNA names
+  ) +
+  labs(
+    x = "Cell Type", 
+    y = "Average Expression", 
+    title = "Expression of Canonical lncRNAs Across Cell Types"
+  )
+
+
+################################################################################
 
 ################### STEP-19: VISUALIZATION ##########################
 
 ######### DotPlot to visualize lncRNAs from each cluster ##########
 
 ###### Identify top 2-3 specific lncRNAs per cluster #########
+
+specific_expr_matrix <- avg_expr_num * tau_scores
 
 top_lncs <- apply(specific_expr_matrix, 2, function(col) {
   names(sort(col, decreasing = TRUE, na.last = TRUE))[1:5]
@@ -724,7 +891,7 @@ sorted_genes <- rownames(avg_expr_num)[tau_order]
 
 top_tau_genes <- sapply(colnames(avg_expr_num), function(cluster_name) {
   cluster_active <- sorted_genes[avg_expr_num[sorted_genes, cluster_name] > 0]
-  cluster_active[1:5] 
+  cluster_active[1:10] 
 })
 
 target_genes <- unique(as.vector(top_tau_genes))
@@ -739,15 +906,27 @@ gene_symbols[is.na(gene_symbols)] <- target_genes[is.na(gene_symbols)]
 
 DotPlot(seurat, features = target_genes, group.by = "cell_ontology") +
   scale_x_discrete(labels = gene_symbols) +
-  coord_flip() +
+  
+  # Add horizontal and vertical dotted guidelines
+  geom_hline(yintercept = seq_len(length(unique(seurat$cell_ontology))) + 0.5, 
+             color = "grey80", linetype = "dotted") +
+  geom_vline(xintercept = seq_len(length(target_genes)) + 0.5, 
+             color = "grey80", linetype = "dotted") +
+  
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, face = "bold"),
-    axis.text.y = element_text(face = "italic")
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, face = "bold"),
+    axis.text.y = element_text(face = "italic"),
+    panel.grid.major = element_line(color = "grey90", linetype = "dashed") # Panel grid fallback
   ) +
   labs(
     title = "Top Cell-Type Specific lncRNAs (Strictly by Tau Index)",
-    x = "Annotated Cell Type",
-    y = "lncRNA Symbol"
+    x = "lncRNAs",
+    y = "Cell Types/Clusters"
   )
 
+
+saveRDS(seurat, "seurat.rds")
+
+
+########################### END OF ANALYSIS ####################################
 
