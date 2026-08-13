@@ -5,6 +5,8 @@
 
 # Ignore all contents inside the Data directory
 Data/*
+tests/
+.github/
 
 *.rds
 

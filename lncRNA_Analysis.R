@@ -18,6 +18,8 @@ library(scDblFinder)
 library(SingleCellExperiment)
 library(harmony)
 library(ggplot2)
+library(EnhancedVolcano)
+
 
 
 ############ STEP-1: LOAD THE DATA #####################
@@ -473,7 +475,7 @@ new_ident <- setNames(c("OPALIN+ Oligodendrocytes",
                         "T lymphocytes"),
                       levels(seurat))
 
-seurat <- RenameIdents(seurat, new_ident)
+seurat$cell_ontology <- Idents(seurat)
 
 DimPlot(seurat, reduction = "umap", label = TRUE)
 
@@ -505,10 +507,20 @@ length(lncrna_genes) ### 9073 lnRNAs in total
 
 ######## Average expression per cluster, restricted to lncRNAs ########
 ?AverageExpression
+remove(avg_expr)
 avg_expr <- AverageExpression(seurat, features = lncrna_genes, 
                               group.by = "seurat_clusters")
 
 write.csv(avg_expr, "Results/lncRNA_expression.csv")
+
+sum(duplicated(rownames(avg_expr))) 
+
+typeof(avg_expr) ### Check the type of avg_expr
+
+sum(duplicated(rownames(avg_expr))) ### Check for duplicated gene names
+
+avg_expr_num <- do.call(rbind, avg_expr)
+
 
 # avg_expr: rows = lncRNA genes, columns = clusters, linear-scale mean expression
 
@@ -521,16 +533,221 @@ head(lncrna_markers)
 
 write.csv(lncrna_markers, "Results/lncrna_markers.csv")
 
+
 ######## STEP 4: tau index — cluster-specificity score per lncRNA ########
 
 tau_calc <- function(x) {
-  if (max(x) == 0) return(0)      # avoid divide-by-zero for all-zero genes
-  x_hat <- x / max(x)
-  sum(1 - x_hat) / (length(x) - 1)
+  if (max(x) == 0) return(0)
+  n <- length(x)
+  sum(1 - (x / max(x))) / (n - 1)
 }
 
-tau_scores <- apply(avg_expr, 1, tau_calc)
+
+tau_scores <- apply(avg_expr_num, 1, tau_calc)
 
 tau_df <- data.frame(gene = names(tau_scores), tau = tau_scores)
+
 tau_df <- tau_df[order(-tau_df$tau), ]
+
 head(tau_df, 20)   # most cluster-specific lncRNAs, ranked
+
+write.csv(tau_df, "Results/tau_index.csv")
+
+
+
+################# STEP-18: FIND DIFFERENTIALLY EXPRESSED LNCRNAS ###########
+
+####### Set main identity to condition column ######
+
+Idents(seurat) <- "condition"
+
+######### Find differentially expressed lncRNAs between PD and Control ######
+
+pd_vs_ctrl_markers <- FindMarkers(
+  seurat,
+  ident.1 = "PD",
+  ident.2 = "Control",
+  features = rownames(avg_expr_num), # Restrict to your lncRNAs
+  logfc.threshold = 0.25,
+  min.pct = 0.1
+)
+
+###### Look at top PD-upregulated lncRNAs #######
+
+head(pd_vs_ctrl_markers[order(-pd_vs_ctrl_markers$avg_log2FC), ])
+
+pd_vs_ctrl_markers
+
+###### Volcano Plot to visualize DE lncRNAs ############
+
+EnhancedVolcano(
+  pd_vs_ctrl_markers,
+  lab = rownames(pd_vs_ctrl_markers),
+  x = 'avg_log2FC',
+  y = 'p_val_adj',
+  pCutoff = 0.05,
+  FCcutoff = 0.5,
+  pointSize = 3.0,
+  labSize = 4.0,
+  title = 'lncRNAs: PD vs. Control',
+  subtitle = 'Volcano plot DE lncRNAs (PD vs Control)'
+)
+
+write.csv(pd_vs_ctrl_markers, "Results/DE_lncRNAs_PD.csv")
+
+
+############ CLUSTER TYPE SPECIFIC DE ANALYSIS ##############
+
+######## Combine Cell Type and Condition in metadata #########
+
+seurat$celltype_condition <- paste0(seurat$cell_ontology, "_", seurat$condition)
+
+Idents(seurat) <- "celltype_condition"
+
+######### PD vs Control specifically in Microglia ##########
+
+pd_microglia_deg <- FindMarkers(
+  seurat,
+  ident.1 = "Microglia_PD",
+  ident.2 = "Microglia_Control",
+  features = rownames(avg_expr_num)
+)
+
+######### Volcano Plot #############
+
+EnhancedVolcano(
+  pd_microglia_deg,
+  lab = rownames(pd_microglia_deg),
+  x = 'avg_log2FC',
+  y = 'p_val_adj',
+  pCutoff = 0.05,
+  FCcutoff = 0.5,
+  pointSize = 3.0,
+  labSize = 4.0,
+  title = 'lncRNAs: PD vs. Control',
+  subtitle = 'Volcano plot showing DE lncRNAs in Microglia (PD vs Control)'
+)
+
+
+###### DE lncrnas in Astrocytes (PD vs. Control) ########
+
+astrocyte_de <- FindMarkers(
+  seurat,
+  ident.1 = "Astrocytes_PD",
+  ident.2 = "Astrocytes_Control",
+  features = rownames(avg_expr_num),
+  logfc.threshold = 0.25,
+  min.pct = 0.1
+)
+
+######## DE lncRNAs in Pericytes (PD vs. Control) ############
+
+pericyte_de <- FindMarkers(
+  seurat,
+  ident.1 = "Pericytes_PD",
+  ident.2 = "Pericytes_Control",
+  features = rownames(avg_expr_num),
+  logfc.threshold = 0.25,
+  min.pct = 0.1
+)
+
+EnhancedVolcano(
+  astrocyte_de,
+  lab = rownames(astrocyte_de),
+  x = 'avg_log2FC',
+  y = 'p_val_adj',
+  pCutoff = 0.05,
+  FCcutoff = 0.5,
+  pointSize = 3.0,
+  labSize = 4.0,
+  title = 'lncRNAs: PD vs. Control',
+  subtitle = 'Volcano plot showing DE lncRNAs in Astrocytes (PD vs Control)'
+)
+
+
+EnhancedVolcano(
+  pericyte_de,
+  lab = rownames(pericyte_de),
+  x = 'avg_log2FC',
+  y = 'p_val_adj',
+  pCutoff = 0.05,
+  FCcutoff = 0.5,
+  pointSize = 3.0,
+  labSize = 4.0,
+  title = 'lncRNAs: PD vs. Control',
+  subtitle = 'Volcano plot showing DE lncRNAs in Pericytes (PD vs Control)'
+)
+
+write.csv(pericyte_de, "Results/DElncRNAs_Pericytes.csv")
+write.csv(pd_microglia_deg, "Results/DElncRNAs_Microglia.csv")
+write.csv(astrocyte_de, "Results/DElncRNAs_Astrocytes.csv")
+
+################### STEP-19: VISUALIZATION ##########################
+
+######### DotPlot to visualize lncRNAs from each cluster ##########
+
+###### Identify top 2-3 specific lncRNAs per cluster #########
+
+top_lncs <- apply(specific_expr_matrix, 2, function(col) {
+  names(sort(col, decreasing = TRUE, na.last = TRUE))[1:5]
+})
+
+target_genes <- unique(as.vector(top_lncs))
+
+######## Map Ensembl IDs to Gene Symbols #########
+
+symbol_lookup <- setNames(biotype_map$SYMBOL, biotype_map$GENEID)
+gene_symbols <- symbol_lookup[target_genes]
+gene_symbols[is.na(gene_symbols)] <- target_genes[is.na(gene_symbols)]
+
+######### Dot Plot showing top lncRNAs per cluster/cell type #############
+
+DotPlot(seurat, features = target_genes, group.by = "cell_ontology") +
+  scale_x_discrete(labels = gene_symbols) +
+  coord_flip() + # Flips plot so cell types are on X-axis and lncRNAs on Y-axis for easier reading
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(face = "italic")
+  ) +
+  labs(
+    title = "Top Specific lncRNAs Across Annotated Cell Types",
+    x = "lncRNAs",
+    y = "Cluster/Cell Type"
+  )
+
+############### DotPlot as per tau index per cluster ################
+
+###### Select top 3-5 lncRNAs per cluster STRICTLY by highest Tau index ######
+
+tau_order <- order(tau_scores, decreasing = TRUE, na.last = TRUE)
+sorted_genes <- rownames(avg_expr_num)[tau_order]
+
+top_tau_genes <- sapply(colnames(avg_expr_num), function(cluster_name) {
+  cluster_active <- sorted_genes[avg_expr_num[sorted_genes, cluster_name] > 0]
+  cluster_active[1:5] 
+})
+
+target_genes <- unique(as.vector(top_tau_genes))
+
+######## Map Ensembl IDs to Gene Symbols ##########
+
+symbol_lookup <- setNames(biotype_map$SYMBOL, biotype_map$GENEID)
+gene_symbols <- symbol_lookup[target_genes]
+gene_symbols[is.na(gene_symbols)] <- target_genes[is.na(gene_symbols)]
+
+######### Dot Plot showing specific lncRNAs per cluster per tau index #######
+
+DotPlot(seurat, features = target_genes, group.by = "cell_ontology") +
+  scale_x_discrete(labels = gene_symbols) +
+  coord_flip() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(face = "italic")
+  ) +
+  labs(
+    title = "Top Cell-Type Specific lncRNAs (Strictly by Tau Index)",
+    x = "Annotated Cell Type",
+    y = "lncRNA Symbol"
+  )
+
+
