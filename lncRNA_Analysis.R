@@ -19,6 +19,8 @@ library(SingleCellExperiment)
 library(harmony)
 library(ggplot2)
 library(EnhancedVolcano)
+library(DESeq2)
+library(muscat)
 
 
 ################################################################################
@@ -561,11 +563,10 @@ avg_expr <- AverageExpression(seurat, features = lncrna_genes,
 
 write.csv(avg_expr, "Results/lncRNA_expression.csv")
 
-sum(duplicated(rownames(avg_expr))) 
+sum(duplicated(rownames(avg_expr))) ### Check for duplicated gene names
 
 typeof(avg_expr) ### Check the type of avg_expr
 
-sum(duplicated(rownames(avg_expr))) ### Check for duplicated gene names
 
 avg_expr_num <- do.call(rbind, avg_expr)
 
@@ -607,32 +608,33 @@ write.csv(tau_df, "Results/tau_index.csv")
 
 ################# STEP-18: FIND DIFFERENTIALLY EXPRESSED LNCRNAS ###########
 
-####### Set main identity to condition column ######
+######### Aggregate counts by Patient ONLY ##########
 
-Idents(seurat) <- "condition"
-
-######### Find differentially expressed lncRNAs between PD and Control ######
-
-pd_vs_ctrl_markers <- FindMarkers(
+pseudo_global <- AggregateExpression(
   seurat,
-  ident.1 = "PD",
-  ident.2 = "Control",
-  features = rownames(avg_expr_num), # Restrict to your lncRNAs
-  logfc.threshold = 0.25,
-  min.pct = 0.1
+  group.by = "patient",
+  return.seurat = TRUE
 )
 
-###### Look at top PD-upregulated lncRNAs #######
+####### Add Condition Information ##########
 
-head(pd_vs_ctrl_markers[order(-pd_vs_ctrl_markers$avg_log2FC), ])
+pseudo_global$condition <- ifelse(grepl("PD", pseudo_global$patient), "PD", "Control")
+Idents(pseudo_global) <- "condition"
 
-pd_vs_ctrl_markers
-
-###### Volcano Plot to visualize DE lncRNAs ############
+######### Global DESeq2 DE on lncRNAs ########
+global_de <- FindMarkers(
+  object = pseudo_global,
+  ident.1 = "PD",
+  ident.2 = "Control",
+  test.use = "DESeq2",
+  features = rownames(avg_expr_num),
+  min.pct = 0,
+  logfc.threshold = 0
+)
 
 EnhancedVolcano(
-  pd_vs_ctrl_markers,
-  lab = rownames(pd_vs_ctrl_markers),
+  global_de,
+  lab = rownames(global_de),
   x = 'avg_log2FC',
   y = 'p_val_adj',
   pCutoff = 0.05,
@@ -643,152 +645,77 @@ EnhancedVolcano(
   subtitle = 'Volcano plot DE lncRNAs (PD vs Control)'
 )
 
-write.csv(pd_vs_ctrl_markers, "Results/DE_lncRNAs_PD.csv")
+write.csv(global_de, "Results/DElncRNAs_PD_vs_Control.csv")
 
 
-############ CLUSTER TYPE SPECIFIC DE ANALYSIS ##############
 
-######## Combine Cell Type and Condition in metadata #########
-
-seurat$celltype_condition <- paste0(seurat$cell_ontology, "_", seurat$condition)
-
-Idents(seurat) <- "celltype_condition"
-
-######### PD vs Control specifically in Microglia ##########
-
-pd_microglia_deg <- FindMarkers(
-  seurat,
-  ident.1 = "Microglia_PD",
-  ident.2 = "Microglia_Control",
-  features = rownames(avg_expr_num)
-)
-
-######### Volcano Plot #############
-
-EnhancedVolcano(
-  pd_microglia_deg,
-  lab = rownames(pd_microglia_deg),
-  x = 'avg_log2FC',
-  y = 'p_val_adj',
-  pCutoff = 0.05,
-  FCcutoff = 0.5,
-  pointSize = 3.0,
-  labSize = 4.0,
-  title = 'lncRNAs: PD vs. Control',
-  subtitle = 'Volcano plot showing DE lncRNAs in Microglia (PD vs Control)'
-)
+################ DE Analysis per cluster #################
 
 
-###### DE lncrnas in Astrocytes (PD vs. Control) ########
+######## Convert Seurat to SingleCellExperiment ########
 
-astrocyte_de <- FindMarkers(
-  seurat,
-  ident.1 = "Astrocytes_PD",
-  ident.2 = "Astrocytes_Control",
-  features = rownames(avg_expr_num),
-  logfc.threshold = 0.25,
-  min.pct = 0.1
-)
+sce_pb <- as.SingleCellExperiment(seurat, assay = "RNA")
+sce_pb$cluster_id <- seurat$cell_ontology
+sce_pb$sample_id  <- seurat$patient
+sce_pb$group_id   <- seurat$condition
 
-######## DE lncRNAs in Pericytes (PD vs. Control) ############
+######## Restrict to lncRNAs  ########
 
-pericyte_de <- FindMarkers(
-  seurat,
-  ident.1 = "Pericytes_PD",
-  ident.2 = "Pericytes_Control",
-  features = rownames(avg_expr_num),
-  logfc.threshold = 0.25,
-  min.pct = 0.1
-)
+sce_pb <- sce_pb[intersect(lncrna_genes, rownames(sce_pb)), ]
 
-EnhancedVolcano(
-  astrocyte_de,
-  lab = rownames(astrocyte_de),
-  x = 'avg_log2FC',
-  y = 'p_val_adj',
-  pCutoff = 0.05,
-  FCcutoff = 0.5,
-  pointSize = 3.0,
-  labSize = 4.0,
-  title = 'lncRNAs: PD vs. Control',
-  subtitle = 'Volcano plot showing DE lncRNAs in Astrocytes (PD vs Control)'
-)
+######## Prep + aggregate to donor x cluster pseudobulk counts ########
 
+sce_pb <- prepSCE(sce_pb, kid = "cluster_id", sid = "sample_id", gid = "group_id", drop = TRUE)
+pb <- aggregateData(sce_pb, assay = "counts", fun = "sum", by = c("cluster_id", "sample_id"))
 
-EnhancedVolcano(
-  pericyte_de,
-  lab = rownames(pericyte_de),
-  x = 'avg_log2FC',
-  y = 'p_val_adj',
-  pCutoff = 0.05,
-  FCcutoff = 0.5,
-  pointSize = 3.0,
-  labSize = 4.0,
-  title = 'lncRNAs: PD vs. Control',
-  subtitle = 'Volcano plot showing DE lncRNAs in Pericytes (PD vs Control)'
-)
+######## Run DS analysis: DESeq2 backend, one call, all clusters at once ########
 
+res_muscat <- pbDS(pb, method = "DESeq2")
 
-######## DE lncRNAs in Ependymal Cells (PD vs. Control) ############
+######## Extract per-cluster results as a single tidy table ########
 
-unique(seurat$celltype_condition)
+muscat_results <- resDS(sce_pb, res_muscat)
 
-ependymal_de <- FindMarkers(
-  seurat,
-  ident.1 = "Ependymal Cells_PD",
-  ident.2 = "Ependymal Cells_Control",
-  features = rownames(avg_expr_num),
-  logfc.threshold = 0.25,
-  min.pct = 0.1
-)
+write.csv(muscat_results, "Results/DElncRNAs_all_clusters_muscat.csv")
 
-EnhancedVolcano(
-  ependymal_de,
-  lab = rownames(ependymal_de),
-  x = 'avg_log2FC',
-  y = 'p_val_adj',
-  pCutoff = 0.05,
-  FCcutoff = 0.5,
-  pointSize = 3.0,
-  labSize = 4.0,
-  title = 'lncRNAs: PD vs. Control',
-  subtitle = 'Volcano plot showing DE lncRNAs in Ependymal Cells (PD vs Control)'
-)
+######## Filter muscat results to significant hits only, keep cluster info ########
 
-######## DE lncRNAs in Ependymal Cells (PD vs. Control) ############
+sig_de_by_cluster <- muscat_results[!is.na(muscat_results$p_adj.loc) & 
+                                      muscat_results$p_adj.loc < 0.05, ]
 
-unique(seurat$celltype_condition)
+######## Keep just the useful columns, sorted by cluster then significance ########
 
-oligodendrocytes_de <- FindMarkers(
-  seurat,
-  ident.1 = "Oligodendrocytes_PD",
-  ident.2 = "Oligodendrocytes_Control",
-  features = rownames(avg_expr_num),
-  logfc.threshold = 0.25,
-  min.pct = 0.1
-)
+sig_de_by_cluster <- sig_de_by_cluster[order(sig_de_by_cluster$cluster_id, 
+                                             sig_de_by_cluster$p_adj.loc), 
+                                       c("gene", "cluster_id", "logFC", "p_val", "p_adj.loc")]
 
-EnhancedVolcano(
-  oligodendrocytes_de,
-  lab = rownames(oligodendrocytes_de),
-  x = 'avg_log2FC',
-  y = 'p_val_adj',
-  pCutoff = 0.05,
-  FCcutoff = 0.5,
-  pointSize = 3.0,
-  labSize = 4.0,
-  title = 'lncRNAs: PD vs. Control',
-  subtitle = 'Volcano plot showing DE lncRNAs in Oligodendrocytes (PD vs Control)'
-)
+head(sig_de_by_cluster, 20)
 
+######## How many significant lncRNAs per cluster ########
 
-############ Save the DE results in csv files ###############
+table(sig_de_by_cluster$cluster_id)
 
-write.csv(pericyte_de, "Results/DElncRNAs_Pericytes.csv")
-write.csv(pd_microglia_deg, "Results/DElncRNAs_Microglia.csv")
-write.csv(astrocyte_de, "Results/DElncRNAs_Astrocytes.csv")
-write.csv(ependymal_de, "Results/DElncRNAs_Ependymal.csv")
-write.csv(oligodendrocytes_de, "Results/DElncRNAs_Oligodendrocytes.csv")
+######## Save it ########
+
+write.csv(sig_de_by_cluster, "Results/DElncRNAs_significant_muscat.csv", row.names = FALSE)
+
+########## DE lncRNAs per cluster #############
+
+de_counts_per_cluster <- as.data.frame(table(sig_de_by_cluster$cluster_id))
+colnames(de_counts_per_cluster) <- c("cluster", "n_significant_lncRNAs")
+de_counts_per_cluster <- de_counts_per_cluster[order(-de_counts_per_cluster$n_significant_lncRNAs), ]
+
+de_counts_per_cluster
+
+######## Bar plot of DE lncRNA counts per cluster ########
+
+ggplot(de_counts_per_cluster, aes(x = reorder(cluster, -n_significant_lncRNAs),
+                                  y = n_significant_lncRNAs)) +
+  geom_col(fill = "steelblue") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Cell type", y = "Number of significant DE lncRNAs (padj < 0.05)",
+       title = "DE lncRNAs per Cluster (PD vs Control)")
 
 
 ######### Check the expression of specific lncRNAs known to be involved in PD ####
@@ -816,7 +743,7 @@ ggplot(df_neat1, aes(x = reorder(CellType, -NEAT1), y = NEAT1)) +
 
 ######## Check the expression of multiple lncRNA ############
 
-target_lncs <- intersect(c("NEAT1", "MALAT1", "MEG3", "MIAT", "SNHG1", "H19"), rownames(seurat))
+target_lncs <- intersect(c("NEAT1", "MALAT1", "MEG3", "MIAT"), rownames(seurat))
 
 #### Get average expression and reshape into long format for ggplot #####
 
@@ -927,6 +854,10 @@ DotPlot(seurat, features = target_genes, group.by = "cell_ontology") +
 
 saveRDS(seurat, "seurat.rds")
 
+# install.packages("renv")
+# 
+# renv::init()
+# 
+renv::snapshot()
 
 ########################### END OF ANALYSIS ####################################
-
