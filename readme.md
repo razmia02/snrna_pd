@@ -128,10 +128,20 @@ renv::restore()
 
 ### Run the Analysis
 
-Once your environment is restored, ensure your GSE157783 input files are placed in the `Data/` directory, then run the full pipeline:
+Once your environment is restored, ensure your GSE157783 input files are placed in the `Data/` directory, then run the R scripts in `scripts/` directory:
 
+Script for Pre-processing, QC, doublet removal, normalization, scaling and clustering:
 ```
-Rscript lncRNA_Analysis.R
+Rscript scripts/01_Preprocessing.R
+```
+
+Script for cluster analysis, marker identification and cluster annotation:
+```
+Rscript scripts/02_Clustering_Annotation.R
+```
+Script for lncRNA analysis including DE analysis, $\tau$ index calculation and visualization:
+```
+Rscript scripts/03_lncRNA_Analysis.R
 ```
 
 All outputs, including cell-type specificity scores (Tau index), cell cluster annotations, differential expression results, and visualization plots, will be saved automatically into the `Results/` and `Plots/` directories.
@@ -145,7 +155,10 @@ All outputs, including cell-type specificity scores (Tau index), cell cluster an
 ├── Data 		# Directory to store raw matrix/barcodes/tsv files
 ├── Plots 		# Plots for visualization
 ├── Results		# Result files in csv format
-├── lncRNA_Analysis.R 		# R Script for analysis
+├── scripts
+│   ├── 01_Preprocessing.R  # R script for QC, normalization, scaling, clustering
+│   ├── 02_Clustering_Annotation.R  # R script to find cluster markers & cluster annotation
+│   └── 03_lncRNA_Analysis.R  # R script for lncRNA analysis
 ├── readme.md 				# Project Readme.md file
 ├── seurat.rds 				# Saved seurat object in rds format
 └── snRNA-seq_PD.Rproj    # R project file
